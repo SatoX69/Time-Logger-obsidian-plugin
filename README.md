@@ -18,6 +18,8 @@ next paragraph.....
 
 Everything outside a `timelgr` block is untouched.
 
+![Time Logger](/images/time-logger.jpg)
+
 ## Automatic behaviour
 
 Processing is event-driven and debounced. There is no fixed polling interval.
