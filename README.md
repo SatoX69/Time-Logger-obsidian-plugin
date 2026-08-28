@@ -8,7 +8,7 @@ Strict mode is permanently enabled in this release. There is no non-strict toggl
 
 Only content between `timelgr` fences is processed:
 
-![Time Logger](/images/time-logger.jpg)
+![Time Logger](/images/time-logger.jpeg)
 
 ```text
 ```timelgr
