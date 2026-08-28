@@ -1,0 +1,9 @@
+{
+  "id": "time-logger",
+  "name": "Time Logger",
+  "version": "1.1.0",
+  "minAppVersion": "1.8.0",
+  "description": "Automatic time and date stamps for daily journaling, permanently scoped to timelgr blocks.",
+  "author": "Jsux",
+  "isDesktopOnly": false
+}

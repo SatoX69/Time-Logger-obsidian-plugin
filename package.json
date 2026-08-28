@@ -1,0 +1,14 @@
+{
+  "name": "time-logger",
+  "version": "1.0.0",
+  "description": "Automatic timestamping for Obsidian daily notes.",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc --project tsconfig.json && node scripts/copy-build.mjs"
+  },
+  "devDependencies": {
+    "obsidian": "latest",
+    "typescript": "^5.8.3"
+  }
+}

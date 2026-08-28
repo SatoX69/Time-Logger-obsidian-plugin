@@ -1,0 +1,18 @@
+.timelgr-preview-timestamp {
+  color: var(--interactive-accent);
+  font-weight: 600;
+}
+
+.timelgr-settings-help {
+  color: var(--text-muted);
+  font-size: var(--font-ui-small);
+  line-height: 1.5;
+}
+
+.timelgr-settings-code {
+  font-family: var(--font-monospace);
+  padding: 0.6em 0.75em;
+  border-radius: 6px;
+  background: var(--background-secondary);
+  white-space: pre-wrap;
+}
