@@ -4,7 +4,6 @@ import {
   MarkdownView,
   Plugin,
   PluginSettingTab,
-  Setting,
   TFile,
   WorkspaceLeaf,
 } from "obsidian";
@@ -235,17 +234,18 @@ function clampContext(value: unknown): number {
   return Math.max(0, Math.min(MAX_CONTEXT, Math.round(Number(value) || 0)));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export default class TimeLoggerPlugin extends Plugin {
   settings: TimeLoggerSettings = { ...DEFAULT_SETTINGS };
 
-  private timestampRegex = buildTimestampRegex(DEFAULT_SETTINGS);
   private timers = new Map<string, number>();
   private updatingEditors = new WeakSet<Editor>();
 
   async onload(): Promise<void> {
     await this.loadSettings();
-    this.timestampRegex = buildTimestampRegex(this.settings);
-
     this.addSettingTab(new TimeLoggerSettingTab(this.app, this));
     this.registerMarkdownPostProcessor(element => this.styleRenderedTimestamps(element));
 
@@ -254,9 +254,6 @@ export default class TimeLoggerPlugin extends Plugin {
     }));
     this.registerEvent(this.app.workspace.on("editor-change", (editor, info) => {
       this.scheduleEditor(editor, info.file, "change");
-    }));
-    this.registerEvent(this.app.workspace.on("editor-paste", (_event, editor) => {
-      this.scheduleEditor(editor, this.app.workspace.getActiveFile(), "paste");
     }));
     this.registerEvent(this.app.workspace.on("layout-change", () => {
       const view = this.app.workspace.getActiveViewOfType<MarkdownView>(MarkdownView);
@@ -284,38 +281,53 @@ export default class TimeLoggerPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    const stored = await this.loadData();
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, stored ?? {});
-    this.settings.contextMode = clampContext(this.settings.contextMode);
-    this.settings.debounceMs = Math.max(100, Math.min(1500, Math.round(Number(this.settings.debounceMs) || DEFAULT_SETTINGS.debounceMs)));
-    this.settings.triggerMode = this.settings.triggerMode === "typing" || this.settings.triggerMode === "paragraph" || this.settings.triggerMode === "both"
-      ? this.settings.triggerMode
-      : DEFAULT_SETTINGS.triggerMode;
+    const stored: unknown = await this.loadData();
+    const data = isRecord(stored) ? stored : {};
 
-    // Strict mode is permanently enabled. Older saved strictMode values are ignored.
-    delete (this.settings as TimeLoggerSettings & { strictMode?: boolean }).strictMode;
-    await this.saveData(this.settings);
-  }
+    this.settings = {
+      timeFormat: typeof data.timeFormat === "string" && data.timeFormat.length > 0
+        ? data.timeFormat
+        : DEFAULT_SETTINGS.timeFormat,
+      includeDate: typeof data.includeDate === "boolean"
+        ? data.includeDate
+        : DEFAULT_SETTINGS.includeDate,
+      dateFormat: typeof data.dateFormat === "string" && data.dateFormat.length > 0
+        ? data.dateFormat
+        : DEFAULT_SETTINGS.dateFormat,
+      customSyntax: typeof data.customSyntax === "string" && data.customSyntax.length > 0
+        ? data.customSyntax
+        : DEFAULT_SETTINGS.customSyntax,
+      contextMode: clampContext(data.contextMode),
+      triggerMode: data.triggerMode === "typing" || data.triggerMode === "paragraph" || data.triggerMode === "both"
+        ? data.triggerMode
+        : DEFAULT_SETTINGS.triggerMode,
+      debounceMs: Math.max(100, Math.min(1500, Math.round(Number(data.debounceMs) || DEFAULT_SETTINGS.debounceMs))),
+    };
 
-  async saveSettings(): Promise<void> {
+    // Strict mode is intentionally hard-coded. Older strictMode values are ignored.
     await this.saveData(this.settings);
-    this.timestampRegex = buildTimestampRegex(this.settings);
   }
 
   private styleRenderedTimestamps(element: HTMLElement): void {
+    const timestampRegex = buildTimestampRegex(this.settings);
     const selector = "p, li, blockquote, h1, h2, h3, h4, h5, h6";
+
     element.querySelectorAll<HTMLElement>(selector).forEach(node => {
       const first = node.firstChild;
       if (!first || first.nodeType !== Node.TEXT_NODE || !first.textContent) return;
 
       const value = first.textContent;
-      const match = value.match(this.timestampRegex);
+      const match = value.match(timestampRegex);
       if (!match || match[0].length === 0) return;
 
-      const span = document.createElement("span");
-      span.className = "timelgr-preview-timestamp";
-      span.textContent = match[0];
-      first.replaceWith(span, document.createTextNode(value.slice(match[0].length)));
+      const span = node.createSpan({
+        cls: "timelgr-preview-timestamp",
+        text: match[0],
+      });
+      first.replaceWith(span);
+      if (value.length > match[0].length) {
+        span.insertAdjacentText("afterend", value.slice(match[0].length));
+      }
     });
   }
 
@@ -342,7 +354,7 @@ export default class TimeLoggerPlugin extends Plugin {
   private shouldHandleReason(reason: string): boolean {
     switch (this.settings.triggerMode) {
       case "typing":
-        return reason === "change" || reason === "paste" || reason === "startup";
+        return reason === "change" || reason === "startup";
       case "paragraph":
         return reason === "focus" || reason === "layout" || reason === "startup";
       default:
@@ -458,7 +470,7 @@ export default class TimeLoggerPlugin extends Plugin {
   }
 
   private isTimestampedLine(line: string): boolean {
-    return this.timestampRegex.test(line);
+    return buildTimestampRegex(this.settings).test(line);
   }
 
   private applyInsertions(editor: Editor, cursor: CursorSnapshot, insertions: PlannedInsertion[]): void {
@@ -494,103 +506,112 @@ export default class TimeLoggerPlugin extends Plugin {
 }
 
 class TimeLoggerSettingTab extends PluginSettingTab {
-  constructor(app: App, private plugin: TimeLoggerPlugin) {
+  constructor(app: App, private readonly plugin: TimeLoggerPlugin) {
     super(app, plugin);
   }
 
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-    containerEl.createEl("h2", { text: "Time Logger" });
-
-    new Setting(containerEl)
-      .setName("Time format")
-      .setDesc("Tokens: HH/H, hh/h, mm/m, ss/s, A/a. Ordinary text is also allowed.")
-      .addText(text => text
-        .setPlaceholder("HH:mm")
-        .setValue(this.plugin.settings.timeFormat)
-        .onChange(async (value: string) => {
-          this.plugin.settings.timeFormat = value || DEFAULT_SETTINGS.timeFormat;
-          await this.plugin.saveSettings();
-        }));
-
-    new Setting(containerEl)
-      .setName("Include date")
-      .setDesc("Add a formatted date to the timestamp.")
-      .addToggle(toggle => toggle
-        .setValue(this.plugin.settings.includeDate)
-        .onChange(async (value: boolean) => {
-          this.plugin.settings.includeDate = value;
-          await this.plugin.saveSettings();
-          this.display();
-        }));
-
-    if (this.plugin.settings.includeDate) {
-      new Setting(containerEl)
-        .setName("Date format")
-        .setDesc("Tokens: YYYY, YY, MMMM, MMM, MM, M, Do, DD, D, dddd, ddd, d.")
-        .addText(text => text
-          .setPlaceholder("YYYY-MM-DD")
-          .setValue(this.plugin.settings.dateFormat)
-          .onChange(async (value: string) => {
-            this.plugin.settings.dateFormat = value || DEFAULT_SETTINGS.dateFormat;
-            await this.plugin.saveSettings();
-          }));
-    }
-
-    new Setting(containerEl)
-      .setName("Custom syntax")
-      .setDesc("Use {TIME} and {DATE}. Example: [{DATE} {TIME}]: or [at {TIME} of Day]:")
-      .addText(text => text
-        .setPlaceholder("[{TIME}]: ")
-        .setValue(this.plugin.settings.customSyntax)
-        .onChange(async (value: string) => {
-          this.plugin.settings.customSyntax = value || DEFAULT_SETTINGS.customSyntax;
-          await this.plugin.saveSettings();
-        }));
-
-    new Setting(containerEl)
-      .setName("Relative line protection")
-      .setDesc("Check 0–5 physical lines before and after. Blank lines count toward distance but are never timestamped.")
-      .addDropdown(drop => drop
-        .addOptions({ off: "Off", "1": "1 line", "2": "2 lines", "3": "3 lines", "4": "4 lines", "5": "5 lines" })
-        .setValue(this.plugin.settings.contextMode === 0 ? "off" : String(this.plugin.settings.contextMode))
-        .onChange(async (value: string) => {
-          this.plugin.settings.contextMode = value === "off" ? 0 : clampContext(value);
-          await this.plugin.saveSettings();
-        }));
-
-    new Setting(containerEl)
-      .setName("Trigger mode")
-      .setDesc("Typing reacts to edits; Focus reacts to focus/layout; both uses both signals.")
-      .addDropdown(drop => drop
-        .addOptions({ typing: "Typing", paragraph: "Focus", both: "Typing + focus" })
-        .setValue(this.plugin.settings.triggerMode)
-        .onChange(async (value: string) => {
-          this.plugin.settings.triggerMode = value as TimeLoggerSettings["triggerMode"];
-          await this.plugin.saveSettings();
-        }));
-
-    new Setting(containerEl)
-      .setName("Response debounce")
-      .setDesc("Delay after an editor event before evaluating the current paragraph. 100–1500 ms.")
-      .addSlider(slider => slider
-        .setLimits(100, 1500, 50)
-        .setValue(this.plugin.settings.debounceMs)
-        .setDynamicTooltip()
-        .onChange(async (value: number) => {
-          this.plugin.settings.debounceMs = Math.round(value);
-          await this.plugin.saveSettings();
-        }));
-
-    const help = containerEl.createDiv("timelgr-settings-help");
-    help.createEl("p", { text: "Strict scope is permanently enabled in this version." });
-    help.createEl("p", { text: "Only content inside ```timelgr fenced blocks is processed." });
-    help.createEl("p", { text: "Blank lines are ignored as insertion targets, but they still count when relative protection measures line distance." });
-    help.createEl("p", { text: "Example:" });
-    help.createEl("pre", {
-      cls: "timelgr-settings-code",
-      text: "```timelgr\nuser text.....\n\nnext paragraph.....\n```",
-    });
+  getSettingDefinitions() {
+    return [
+      {
+        type: "group",
+        heading: "Timestamp format",
+        items: [
+          {
+            name: "Time format",
+            desc: "Tokens: HH/H, hh/h, mm/m, ss/s, A/a. Ordinary text is also allowed.",
+            control: {
+              type: "text",
+              key: "timeFormat",
+              placeholder: "HH:mm",
+              validate: (value: string) => value.trim().length > 0 ? undefined : "Time format cannot be empty.",
+            },
+          },
+          {
+            name: "Include date",
+            desc: "Add a formatted date to the timestamp.",
+            control: { type: "toggle", key: "includeDate" },
+          },
+          {
+            name: "Date format",
+            desc: "Tokens: YYYY, YY, MMMM, MMM, MM, M, Do, DD, D, dddd, ddd, d.",
+            visible: () => this.plugin.settings.includeDate,
+            control: {
+              type: "text",
+              key: "dateFormat",
+              placeholder: "YYYY-MM-DD",
+              validate: (value: string) => value.trim().length > 0 ? undefined : "Date format cannot be empty.",
+            },
+          },
+          {
+            name: "Custom syntax",
+            desc: "Use {TIME} and {DATE}. Example: [{DATE} {TIME}]: or [at {TIME} of Day]:.",
+            control: {
+              type: "text",
+              key: "customSyntax",
+              placeholder: "[{TIME}]: ",
+              validate: (value: string) => /\{TIME\}/i.test(value) ? undefined : "Custom syntax must contain {TIME}.",
+            },
+          },
+        ],
+      },
+      {
+        type: "group",
+        heading: "Insertion behavior",
+        items: [
+          {
+            name: "Relative line protection",
+            desc: "Check 0–5 physical lines before and after. Blank lines count toward distance but are never timestamped.",
+            control: {
+              type: "slider",
+              key: "contextMode",
+              min: 0,
+              max: MAX_CONTEXT,
+              step: 1,
+              defaultValue: DEFAULT_SETTINGS.contextMode,
+            },
+          },
+          {
+            name: "Trigger mode",
+            desc: "Typing reacts to editor changes; focus reacts when the active note changes or the layout changes.",
+            control: {
+              type: "dropdown",
+              key: "triggerMode",
+              defaultValue: DEFAULT_SETTINGS.triggerMode,
+              options: {
+                typing: "Typing",
+                paragraph: "Focus",
+                both: "Typing + focus",
+              },
+            },
+          },
+          {
+            name: "Response debounce",
+            desc: "Delay after an editor event before evaluating the current line.",
+            control: {
+              type: "slider",
+              key: "debounceMs",
+              min: 100,
+              max: 1500,
+              step: 50,
+              defaultValue: DEFAULT_SETTINGS.debounceMs,
+            },
+          },
+        ],
+      },
+      {
+        type: "group",
+        heading: "Scope",
+        items: [
+          {
+            name: "Strict scope",
+            desc: "Time Logger only processes content inside ```timelgr fenced blocks. This is always enabled.",
+          },
+          {
+            name: "Blank lines",
+            desc: "Blank lines are never timestamped, but they still count as physical lines for relative protection.",
+          },
+        ],
+      },
+    ];
   }
 }

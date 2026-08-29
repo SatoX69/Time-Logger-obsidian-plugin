@@ -1,4 +1,4 @@
-# Time Logger 1.1.0
+# Time Logger 1.2.0
 
 Time Logger automatically adds time/date prefixes to journal paragraphs inside `timelgr` fenced blocks.
 
@@ -7,8 +7,6 @@ Time Logger automatically adds time/date prefixes to journal paragraphs inside `
 Strict mode is permanently enabled in this release. There is no non-strict toggle or command.
 
 Only content between `timelgr` fences is processed:
-
-![Time Logger](/images/time-logger.jpeg)
 
 ```text
 ```timelgr
@@ -64,7 +62,3 @@ Example:
 
 - **Insert timestamp at current line** — explicitly timestamp the current paragraph when it is inside a `timelgr` block.
 - **Rescan current note** — evaluate every non-empty paragraph inside `timelgr` blocks.
-
-
-
-###### This was completely generated using AI and have been tested for practical usage. It works as intended
