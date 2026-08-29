@@ -9,8 +9,6 @@ import {
   SettingDefinitionItem,
 } from "obsidian";
 
-import moment from "moment";
-
 interface TimeLoggerSettings {
   timeFormat: string;
   includeDate: boolean;
