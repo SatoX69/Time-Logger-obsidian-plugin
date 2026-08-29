@@ -1,4 +1,4 @@
-# Time Logger 1.2.0
+# Time Logger 1.3.0
 
 Time Logger automatically adds time/date prefixes to journal paragraphs inside `timelgr` fenced blocks.
 
