@@ -1,8 +1,7 @@
 {
   "compilerOptions": {
     "baseUrl": ".",
-    "paths": { "obsidian": ["node_modules/obsidian"] },
-    "typeRoots": ["node_modules/@types", "node_modules/obsidian"],
+    "skipLibCheck": true,
     "inlineSourceMap": true,
     "inlineSources": true,
     "module": "CommonJS",
@@ -20,7 +19,18 @@
     "importHelpers": false,
     "downlevelIteration": true,
     "esModuleInterop": true,
-    "lib": ["dom", "es5", "scripthost", "es2015", "es2016", "es2017", "es2018", "es2019", "es2020", "es2021"]
+    "lib": [
+      "dom",
+      "es5",
+      "scripthost",
+      "es2015",
+      "es2016",
+      "es2017",
+      "es2018",
+      "es2019",
+      "es2020",
+      "es2021"
+    ]
   },
   "include": ["src/**/*.ts"]
 }

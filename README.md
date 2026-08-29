@@ -65,4 +65,4 @@ Example:
 - **Insert timestamp at current line** — explicitly timestamp the current paragraph when it is inside a `timelgr` block.
 - **Rescan current note** — evaluate every non-empty paragraph inside `timelgr` blocks.
 
-###### THIS IS FULLY AI GENERATED and TESTED
+###### Generated with AI, debugged and stabilized by me

@@ -6,7 +6,10 @@ import {
   PluginSettingTab,
   TFile,
   WorkspaceLeaf,
+  SettingDefinitionItem,
 } from "obsidian";
+
+import moment from "moment";
 
 interface TimeLoggerSettings {
   timeFormat: string;
@@ -61,10 +64,14 @@ function ordinal(value: number): string {
   const mod100 = value % 100;
   if (mod100 >= 11 && mod100 <= 13) return `${value}th`;
   switch (value % 10) {
-    case 1: return `${value}st`;
-    case 2: return `${value}nd`;
-    case 3: return `${value}rd`;
-    default: return `${value}th`;
+    case 1:
+      return `${value}st`;
+    case 2:
+      return `${value}nd`;
+    case 3:
+      return `${value}rd`;
+    default:
+      return `${value}th`;
   }
 }
 
@@ -83,7 +90,7 @@ function formatTime(date: Date, format: string): string {
     A: h24 >= 12 ? "PM" : "AM",
     a: h24 >= 12 ? "pm" : "am",
   };
-  return format.replace(/HH|hh|mm|ss|A|a|H|h|m|s/g, token => tokens[token]);
+  return format.replace(/HH|hh|mm|ss|A|a|H|h|m|s/g, (token) => tokens[token]);
 }
 
 function formatDate(date: Date, format: string): string {
@@ -101,7 +108,10 @@ function formatDate(date: Date, format: string): string {
     ddd: date.toLocaleString(undefined, { weekday: "short" }),
     d: String(date.getDay()),
   };
-  return format.replace(/YYYY|MMMM|MMM|YY|MM|Do|DD|dddd|ddd|M|D|d/g, token => tokens[token]);
+  return format.replace(
+    /YYYY|MMMM|MMM|YY|MM|Do|DD|dddd|ddd|M|D|d/g,
+    (token) => tokens[token],
+  );
 }
 
 function buildTimeFormatRegex(format: string): string {
@@ -171,9 +181,13 @@ function buildTimestampRegex(settings: TimeLoggerSettings): RegExp {
     pattern += escapeRegExp(syntax.slice(last, match.index));
     const token = match[1].toUpperCase();
     if (token === "TIME") {
-      pattern += buildTimeFormatRegex(settings.timeFormat || DEFAULT_SETTINGS.timeFormat);
+      pattern += buildTimeFormatRegex(
+        settings.timeFormat || DEFAULT_SETTINGS.timeFormat,
+      );
     } else if (settings.includeDate) {
-      pattern += buildDateFormatRegex(settings.dateFormat || DEFAULT_SETTINGS.dateFormat);
+      pattern += buildDateFormatRegex(
+        settings.dateFormat || DEFAULT_SETTINGS.dateFormat,
+      );
     }
     last = match.index + match[0].length;
   }
@@ -247,31 +261,53 @@ export default class TimeLoggerPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new TimeLoggerSettingTab(this.app, this));
-    this.registerMarkdownPostProcessor(element => this.styleRenderedTimestamps(element));
+    this.registerMarkdownPostProcessor((element) =>
+      this.styleRenderedTimestamps(element),
+    );
 
-    this.registerEvent(this.app.workspace.on("active-leaf-change", leaf => {
-      if (leaf) this.scheduleLeaf(leaf, "focus");
-    }));
-    this.registerEvent(this.app.workspace.on("editor-change", (editor, info) => {
-      this.scheduleEditor(editor, info.file, "change");
-    }));
-    this.registerEvent(this.app.workspace.on("layout-change", () => {
-      const view = this.app.workspace.getActiveViewOfType<MarkdownView>(MarkdownView);
-      if (view) this.scheduleEditor(view.editor, view.file, "layout");
-    }));
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        if (leaf) this.scheduleLeaf(leaf, "focus");
+      }),
+    );
+    this.registerEvent(
+      this.app.workspace.on("editor-change", (editor, info) => {
+        this.scheduleEditor(editor, info.file, "change");
+      }),
+    );
+    this.registerEvent(
+      this.app.workspace.on("layout-change", () => {
+        const view =
+          this.app.workspace.getActiveViewOfType<MarkdownView>(MarkdownView);
+        if (view) this.scheduleEditor(view.editor, view.file, "layout");
+      }),
+    );
 
     this.addCommand({
       id: "timestamp-current-line",
       name: "Insert timestamp at current line",
-      editorCallback: (editor: Editor) => this.processEditor(editor, this.app.workspace.getActiveFile(), true, true),
+      editorCallback: (editor: Editor) =>
+        this.processEditor(
+          editor,
+          this.app.workspace.getActiveFile(),
+          true,
+          true,
+        ),
     });
     this.addCommand({
       id: "rescan-current-note",
       name: "Rescan current note",
-      editorCallback: (editor: Editor) => this.processEditor(editor, this.app.workspace.getActiveFile(), true, false),
+      editorCallback: (editor: Editor) =>
+        this.processEditor(
+          editor,
+          this.app.workspace.getActiveFile(),
+          true,
+          false,
+        ),
     });
 
-    const view = this.app.workspace.getActiveViewOfType<MarkdownView>(MarkdownView);
+    const view =
+      this.app.workspace.getActiveViewOfType<MarkdownView>(MarkdownView);
     if (view) this.scheduleEditor(view.editor, view.file, "startup");
   }
 
@@ -285,26 +321,38 @@ export default class TimeLoggerPlugin extends Plugin {
     const data = isRecord(stored) ? stored : {};
 
     this.settings = {
-      timeFormat: typeof data.timeFormat === "string" && data.timeFormat.length > 0
-        ? data.timeFormat
-        : DEFAULT_SETTINGS.timeFormat,
-      includeDate: typeof data.includeDate === "boolean"
-        ? data.includeDate
-        : DEFAULT_SETTINGS.includeDate,
-      dateFormat: typeof data.dateFormat === "string" && data.dateFormat.length > 0
-        ? data.dateFormat
-        : DEFAULT_SETTINGS.dateFormat,
-      customSyntax: typeof data.customSyntax === "string" && data.customSyntax.length > 0
-        ? data.customSyntax
-        : DEFAULT_SETTINGS.customSyntax,
+      timeFormat:
+        typeof data.timeFormat === "string" && data.timeFormat.length > 0
+          ? data.timeFormat
+          : DEFAULT_SETTINGS.timeFormat,
+      includeDate:
+        typeof data.includeDate === "boolean"
+          ? data.includeDate
+          : DEFAULT_SETTINGS.includeDate,
+      dateFormat:
+        typeof data.dateFormat === "string" && data.dateFormat.length > 0
+          ? data.dateFormat
+          : DEFAULT_SETTINGS.dateFormat,
+      customSyntax:
+        typeof data.customSyntax === "string" && data.customSyntax.length > 0
+          ? data.customSyntax
+          : DEFAULT_SETTINGS.customSyntax,
       contextMode: clampContext(data.contextMode),
-      triggerMode: data.triggerMode === "typing" || data.triggerMode === "paragraph" || data.triggerMode === "both"
-        ? data.triggerMode
-        : DEFAULT_SETTINGS.triggerMode,
-      debounceMs: Math.max(100, Math.min(1500, Math.round(Number(data.debounceMs) || DEFAULT_SETTINGS.debounceMs))),
+      triggerMode:
+        data.triggerMode === "typing" ||
+        data.triggerMode === "paragraph" ||
+        data.triggerMode === "both"
+          ? data.triggerMode
+          : DEFAULT_SETTINGS.triggerMode,
+      debounceMs: Math.max(
+        100,
+        Math.min(
+          1500,
+          Math.round(Number(data.debounceMs) || DEFAULT_SETTINGS.debounceMs),
+        ),
+      ),
     };
 
-    // Strict mode is intentionally hard-coded. Older strictMode values are ignored.
     await this.saveData(this.settings);
   }
 
@@ -312,9 +360,10 @@ export default class TimeLoggerPlugin extends Plugin {
     const timestampRegex = buildTimestampRegex(this.settings);
     const selector = "p, li, blockquote, h1, h2, h3, h4, h5, h6";
 
-    element.querySelectorAll<HTMLElement>(selector).forEach(node => {
+    element.querySelectorAll<HTMLElement>(selector).forEach((node) => {
       const first = node.firstChild;
-      if (!first || first.nodeType !== Node.TEXT_NODE || !first.textContent) return;
+      if (!first || first.nodeType !== Node.TEXT_NODE || !first.textContent)
+        return;
 
       const value = first.textContent;
       const match = value.match(timestampRegex);
@@ -336,8 +385,17 @@ export default class TimeLoggerPlugin extends Plugin {
     this.scheduleEditor(leaf.view.editor, leaf.view.file, reason);
   }
 
-  private scheduleEditor(editor: Editor, file: TFile | null, reason: string): void {
-    if (!file || this.updatingEditors.has(editor) || !this.shouldHandleReason(reason)) return;
+  private scheduleEditor(
+    editor: Editor,
+    file: TFile | null,
+    reason: string,
+  ): void {
+    if (
+      !file ||
+      this.updatingEditors.has(editor) ||
+      !this.shouldHandleReason(reason)
+    )
+      return;
     if (!this.isActiveEditor(editor, file)) return;
 
     const existing = this.timers.get(file.path);
@@ -356,23 +414,38 @@ export default class TimeLoggerPlugin extends Plugin {
       case "typing":
         return reason === "change" || reason === "startup";
       case "paragraph":
-        return reason === "focus" || reason === "layout" || reason === "startup";
+        return (
+          reason === "focus" || reason === "layout" || reason === "startup"
+        );
       default:
         return true;
     }
   }
 
   private isActiveEditor(editor: Editor, file: TFile): boolean {
-    const view = this.app.workspace.getActiveViewOfType<MarkdownView>(MarkdownView);
-    return Boolean(view && view.editor === editor && view.file?.path === file.path);
+    const view =
+      this.app.workspace.getActiveViewOfType<MarkdownView>(MarkdownView);
+    return Boolean(
+      view && view.editor === editor && view.file?.path === file.path,
+    );
   }
 
   /**
    * Automatic processing works on the cursor's logical paragraph only.
    * Explicit rescan processes every paragraph in every timelgr scope.
    */
-  private processEditor(editor: Editor, file: TFile | null, force: boolean, cursorOnly: boolean): void {
-    if (!file || this.updatingEditors.has(editor) || !this.isActiveEditor(editor, file)) return;
+  private processEditor(
+    editor: Editor,
+    file: TFile | null,
+    force: boolean,
+    cursorOnly: boolean,
+  ): void {
+    if (
+      !file ||
+      this.updatingEditors.has(editor) ||
+      !this.isActiveEditor(editor, file)
+    )
+      return;
 
     const source = editor.getValue();
     const lines = source.split("\n");
@@ -403,7 +476,17 @@ export default class TimeLoggerPlugin extends Plugin {
       const target = paragraph.start;
       if (!meaningful(lines[target] ?? "")) continue;
       if (this.paragraphHasTimestamp(paragraph, timestampLines)) continue;
-      if (context > 0 && this.hasNearbyTimestamp(timestampLines, target, context, lines.length, scopes)) continue;
+      if (
+        context > 0 &&
+        this.hasNearbyTimestamp(
+          timestampLines,
+          target,
+          context,
+          lines.length,
+          scopes,
+        )
+      )
+        continue;
 
       planned.push({ line: target, text: this.makeTimestamp(new Date()) });
       timestampLines.add(target);
@@ -435,14 +518,21 @@ export default class TimeLoggerPlugin extends Plugin {
     return result;
   }
 
-  private getCursorParagraph(paragraphs: LineRange[], cursorLine: number): LineRange[] {
+  private getCursorParagraph(
+    paragraphs: LineRange[],
+    cursorLine: number,
+  ): LineRange[] {
     for (const paragraph of paragraphs) {
-      if (cursorLine >= paragraph.start && cursorLine <= paragraph.end) return [paragraph];
+      if (cursorLine >= paragraph.start && cursorLine <= paragraph.end)
+        return [paragraph];
     }
     return [];
   }
 
-  private paragraphHasTimestamp(paragraph: LineRange, timestampLines: Set<number>): boolean {
+  private paragraphHasTimestamp(
+    paragraph: LineRange,
+    timestampLines: Set<number>,
+  ): boolean {
     for (let line = paragraph.start; line <= paragraph.end; line++) {
       if (timestampLines.has(line)) return true;
     }
@@ -463,8 +553,18 @@ export default class TimeLoggerPlugin extends Plugin {
     for (let offset = 1; offset <= distance; offset++) {
       const before = targetLine - offset;
       const after = targetLine + offset;
-      if (before >= 0 && lineInScopes(before, scopes) && timestampLines.has(before)) return true;
-      if (after < lineCount && lineInScopes(after, scopes) && timestampLines.has(after)) return true;
+      if (
+        before >= 0 &&
+        lineInScopes(before, scopes) &&
+        timestampLines.has(before)
+      )
+        return true;
+      if (
+        after < lineCount &&
+        lineInScopes(after, scopes) &&
+        timestampLines.has(after)
+      )
+        return true;
     }
     return false;
   }
@@ -473,18 +573,26 @@ export default class TimeLoggerPlugin extends Plugin {
     return buildTimestampRegex(this.settings).test(line);
   }
 
-  private applyInsertions(editor: Editor, cursor: CursorSnapshot, insertions: PlannedInsertion[]): void {
+  private applyInsertions(
+    editor: Editor,
+    cursor: CursorSnapshot,
+    insertions: PlannedInsertion[],
+  ): void {
     // Reverse order preserves all original line positions during insertion.
     insertions.sort((a, b) => b.line - a.line);
 
     this.updatingEditors.add(editor);
     try {
       for (const item of insertions) {
-        editor.replaceRange(item.text, { line: item.line, ch: 0 }, { line: item.line, ch: 0 });
+        editor.replaceRange(
+          item.text,
+          { line: item.line, ch: 0 },
+          { line: item.line, ch: 0 },
+        );
       }
 
       const cursorShift = insertions
-        .filter(item => item.line === cursor.line)
+        .filter((item) => item.line === cursor.line)
         .reduce((total, item) => total + item.text.length, 0);
 
       editor.setCursor({ line: cursor.line, ch: cursor.ch + cursorShift });
@@ -494,9 +602,15 @@ export default class TimeLoggerPlugin extends Plugin {
   }
 
   private makeTimestamp(date: Date): string {
-    const time = formatTime(date, this.settings.timeFormat || DEFAULT_SETTINGS.timeFormat);
+    const time = formatTime(
+      date,
+      this.settings.timeFormat || DEFAULT_SETTINGS.timeFormat,
+    );
     const dateText = this.settings.includeDate
-      ? formatDate(date, this.settings.dateFormat || DEFAULT_SETTINGS.dateFormat)
+      ? formatDate(
+          date,
+          this.settings.dateFormat || DEFAULT_SETTINGS.dateFormat,
+        )
       : "";
 
     return (this.settings.customSyntax || DEFAULT_SETTINGS.customSyntax)
@@ -506,42 +620,58 @@ export default class TimeLoggerPlugin extends Plugin {
 }
 
 class TimeLoggerSettingTab extends PluginSettingTab {
-  constructor(app: App, private readonly plugin: TimeLoggerPlugin) {
+  constructor(
+    app: App,
+    private readonly plugin: TimeLoggerPlugin,
+  ) {
     super(app, plugin);
   }
 
-  getSettingDefinitions() {
+  getSettingDefinitions(): SettingDefinitionItem[] {
     return [
       {
-        type: "group",
-        heading: "Timestamp format",
-        items: [
-          {
-            name: "Time format",
-            desc: "Tokens: HH/H, hh/h, mm/m, ss/s, A/a. Ordinary text is also allowed.",
-            control: {
-              type: "text",
-              key: "timeFormat",
-              placeholder: "HH:mm",
-              validate: (value: string) => value.trim().length > 0 ? undefined : "Time format cannot be empty.",
-            },
-          },
-          {
-            name: "Include date",
-            desc: "Add a formatted date to the timestamp.",
-            control: { type: "toggle", key: "includeDate" },
-          },
-          {
-            name: "Date format",
-            desc: "Tokens: YYYY, YY, MMMM, MMM, MM, M, Do, DD, D, dddd, ddd, d.",
-            visible: () => this.plugin.settings.includeDate,
-            control: {
-              type: "text",
-              key: "dateFormat",
-              placeholder: "YYYY-MM-DD",
-              validate: (value: string) => value.trim().length > 0 ? undefined : "Date format cannot be empty.",
-            },
-          },
+  type: "group",
+  heading: "Timestamp format",
+  items: [
+    {
+      name: "Time format",
+      desc: "Format used for timestamps.",
+      control: {
+        type: "text",
+        key: "timeFormat",
+        placeholder: "HH:mm",
+        validate: (value: string) =>
+          value.trim().length > 0
+            ? undefined
+            : "Time format cannot be empty.",
+      },
+    },
+
+    {
+      name: "Include date",
+      desc: "Add a formatted date to the timestamp.",
+      control: {
+        type: "toggle",
+        key: "includeDate",
+      },
+    },
+
+    {
+      name: "Date format",
+      desc: "Format used for dates.",
+      control: {
+        type: "text",
+        key: "dateFormat",
+        placeholder: "YYYY-MM-DD",
+        validate: (value: string) =>
+          value.trim().length > 0
+            ? undefined
+            : "Date format cannot be empty.",
+      },
+    },
+  ],
+},
+
           {
             name: "Custom syntax",
             desc: "Use {TIME} and {DATE}. Example: [{DATE} {TIME}]: or [at {TIME} of Day]:.",
@@ -552,15 +682,14 @@ class TimeLoggerSettingTab extends PluginSettingTab {
               validate: (value: string) => /\{TIME\}/i.test(value) ? undefined : "Custom syntax must contain {TIME}.",
             },
           },
-        ],
-      },
       {
         type: "group",
         heading: "Insertion behavior",
         items: [
           {
             name: "Relative line protection",
-            desc: "Check 0–5 physical lines before and after. Blank lines count toward distance but are never timestamped.",
+            desc: `Check 0–${MAX_CONTEXT} physical lines before and after. Blank lines count toward distance but are never timestamped.`,
+
             control: {
               type: "slider",
               key: "contextMode",
@@ -570,9 +699,11 @@ class TimeLoggerSettingTab extends PluginSettingTab {
               defaultValue: DEFAULT_SETTINGS.contextMode,
             },
           },
+
           {
             name: "Trigger mode",
             desc: "Typing reacts to editor changes; focus reacts when the active note changes or the layout changes.",
+
             control: {
               type: "dropdown",
               key: "triggerMode",
@@ -584,9 +715,11 @@ class TimeLoggerSettingTab extends PluginSettingTab {
               },
             },
           },
+
           {
             name: "Response debounce",
             desc: "Delay after an editor event before evaluating the current line.",
+
             control: {
               type: "slider",
               key: "debounceMs",
@@ -598,20 +731,6 @@ class TimeLoggerSettingTab extends PluginSettingTab {
           },
         ],
       },
-      {
-        type: "group",
-        heading: "Scope",
-        items: [
-          {
-            name: "Strict scope",
-            desc: "Time Logger only processes content inside ```timelgr fenced blocks. This is always enabled.",
-          },
-          {
-            name: "Blank lines",
-            desc: "Blank lines are never timestamped, but they still count as physical lines for relative protection.",
-          },
-        ],
-      },
-    ];
+    ] satisfies SettingDefinitionItem[];
   }
 }
