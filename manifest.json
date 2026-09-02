@@ -1,7 +1,7 @@
 {
   "id": "time-logger",
   "name": "Time Logger",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "minAppVersion": "1.13.0",
   "description": "Automatic time and date stamps for a better and more precise daily journaling experience.",
   "author": "Jsux",

@@ -1,10 +1,10 @@
-# Time Logger 1.4.0
+# Time Logger 1.4.1
 
 Time Logger automatically adds time/date prefixes to journal paragraphs inside configured Time Logger blocks.
 
 ## V1 and V2
 
-Version 1.4.0 keeps the existing V1 implementation unchanged as the default.
+Version 1.4.1 keeps the existing V1 implementation unchanged as the default.
 
 ### V1 — `timelgr` fenced blocks
 
@@ -112,4 +112,22 @@ Upgrading from 1.3.7 is non-destructive:
 - Existing `timelgr` blocks continue to work exactly as before when V2 is disabled.
 - V2-specific settings are added with safe defaults.
 
-###### Works really well for journaling. -- my testimony
+###### Generated with AI, debugged and stabilized by me
+
+
+## 1.4.1 changes
+
+- Migrated the plugin settings tab to Obsidian's declarative `getSettingDefinitions()` API.
+- Removed the deprecated `display()` settings implementation and manual settings refresh.
+- Removed deprecated slider dynamic tooltips; Obsidian now displays slider values inline.
+- Renamed the advanced section heading to **Advanced**, avoiding redundant “settings” wording in headings.
+- V2 visibility is now declarative and refreshes automatically when its prerequisite toggles change.
+
+
+## 1.4.1 changes
+
+- Migrated the plugin settings tab to Obsidian's declarative `getSettingDefinitions()` API.
+- Removed the deprecated `display()` settings implementation and manual settings refresh.
+- Removed deprecated slider dynamic tooltips; Obsidian now displays slider values inline.
+- Renamed the advanced section heading to **Advanced**, avoiding redundant “settings” wording in headings.
+- V2 visibility is now declarative and refreshes automatically when its prerequisite toggles change.

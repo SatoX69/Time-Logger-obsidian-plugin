@@ -4,7 +4,6 @@ import {
   MarkdownView,
   Plugin,
   PluginSettingTab,
-  Setting,
   TFile,
   WorkspaceLeaf,
 } from "obsidian";
@@ -826,224 +825,166 @@ export default class TimeLoggerPlugin extends Plugin {
 }
 
 class TimeLoggerSettingTab extends PluginSettingTab {
+  plugin: TimeLoggerPlugin;
+
   constructor(
     app: App,
-    private readonly plugin: TimeLoggerPlugin,
+    plugin: TimeLoggerPlugin,
   ) {
     super(app, plugin);
+    this.plugin = plugin;
   }
 
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-
-    new Setting(containerEl).setName("Timestamp format").setHeading();
-
-    new Setting(containerEl)
-      .setName("Time format")
-      .setDesc("Format used for timestamps.")
-      .addText((text) =>
-        text
-          .setValue(this.plugin.settings.timeFormat)
-          .setPlaceholder("HH:mm")
-          .onChange(async (value) => {
-            const next = value.trim();
-            if (!next) return;
-            this.plugin.settings.timeFormat = next;
-            await this.plugin.saveData(this.plugin.settings);
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Include date")
-      .setDesc("Add a formatted date to the timestamp.")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.includeDate)
-          .onChange(async (value) => {
-            this.plugin.settings.includeDate = value;
-            await this.plugin.saveData(this.plugin.settings);
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Date format")
-      .setDesc("Format used for dates.")
-      .addText((text) =>
-        text
-          .setValue(this.plugin.settings.dateFormat)
-          .setPlaceholder("YYYY-MM-DD")
-          .onChange(async (value) => {
-            const next = value.trim();
-            if (!next) return;
-            this.plugin.settings.dateFormat = next;
-            await this.plugin.saveData(this.plugin.settings);
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Custom syntax")
-      .setDesc(
-        "Use {TIME} and {DATE}. Example: [{DATE} {TIME}]: or [at {TIME} of Day]:.",
-      )
-      .addText((text) =>
-        text
-          .setValue(this.plugin.settings.customSyntax)
-          .setPlaceholder("[{TIME}]: ")
-          .onChange(async (value) => {
-            if (!/\{TIME\}/i.test(value)) return;
-            this.plugin.settings.customSyntax = value;
-            await this.plugin.saveData(this.plugin.settings);
-          }),
-      );
-
-    new Setting(containerEl).setName("Insertion behavior").setHeading();
-
-    new Setting(containerEl)
-      .setName("Use V2")
-      .setDesc(
-        'V1 uses ```timelgr code blocks. V2 does not use code blocks; it uses a configurable prefix/suffix block, defaulting to { and }.',
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.useV2)
-          .onChange(async (value) => {
-            this.plugin.settings.useV2 = value;
-            await this.plugin.saveData(this.plugin.settings);
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Relative line protection")
-      .setDesc(
-        `Check 0–${MAX_CONTEXT} physical lines before and after. Blank lines count toward distance but are never timestamped.`,
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(0, MAX_CONTEXT, 1)
-          .setValue(this.plugin.settings.contextMode)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.contextMode = value;
-            await this.plugin.saveData(this.plugin.settings);
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Trigger mode")
-      .setDesc(
-        "Typing reacts to editor changes; focus reacts when the active note changes or the layout changes.",
-      )
-      .addDropdown((dropdown) =>
-        dropdown
-          .addOption("typing", "Typing")
-          .addOption("paragraph", "Focus")
-          .addOption("both", "Typing + focus")
-          .setValue(this.plugin.settings.triggerMode)
-          .onChange(async (value) => {
-            if (
-              value !== "typing" &&
-              value !== "paragraph" &&
-              value !== "both"
-            ) {
-              return;
-            }
-
-            this.plugin.settings.triggerMode = value;
-            await this.plugin.saveData(this.plugin.settings);
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("Response debounce")
-      .setDesc(
-        "Delay after an editor event before evaluating the current line.",
-      )
-      .addSlider((slider) =>
-        slider
-          .setLimits(100, 1500, 50)
-          .setValue(this.plugin.settings.debounceMs)
-          .setDynamicTooltip()
-          .onChange(async (value) => {
-            this.plugin.settings.debounceMs = value;
-            await this.plugin.saveData(this.plugin.settings);
-          }),
-      );
-
-    new Setting(containerEl).setName("Advanced settings").setHeading();
-
-    new Setting(containerEl)
-      .setName("Advanced settings")
-      .setDesc(
-        "Show additional V2 block controls and backward-compatibility options.",
-      )
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.advancedSettings)
-          .onChange(async (value) => {
-            this.plugin.settings.advancedSettings = value;
-            await this.plugin.saveData(this.plugin.settings);
-            this.display();
-          }),
-      );
-
-    if (!this.plugin.settings.advancedSettings) return;
-
-    const advancedContainer = containerEl.createDiv({
-      cls: "timelgr-settings-advanced",
-    });
-
-    if (this.plugin.settings.useV2) {
-      new Setting(advancedContainer)
-        .setName("Custom prefix")
-        .setDesc("Standalone line used to open a V2 block.")
-        .addText((text) =>
-          text
-            .setValue(this.plugin.settings.v2Prefix)
-            .setPlaceholder("{")
-            .onChange(async (value) => {
-              const next = value.trim();
-              if (!next) return;
-              this.plugin.settings.v2Prefix = next;
-              await this.plugin.saveData(this.plugin.settings);
-            }),
-        );
-
-      new Setting(advancedContainer)
-        .setName("Custom suffix")
-        .setDesc("Standalone line used to close a V2 block.")
-        .addText((text) =>
-          text
-            .setValue(this.plugin.settings.v2Suffix)
-            .setPlaceholder("}")
-            .onChange(async (value) => {
-              const next = value.trim();
-              if (!next) return;
-              this.plugin.settings.v2Suffix = next;
-              await this.plugin.saveData(this.plugin.settings);
-            }),
-        );
-
-      new Setting(advancedContainer)
-        .setName("Backward compatibility")
-        .setDesc(
-          "When enabled with V2, both V1 ```timelgr``` blocks and V2 blocks are processed.",
-        )
-        .addToggle((toggle) =>
-          toggle
-            .setValue(this.plugin.settings.backwardCompatibility)
-            .onChange(async (value) => {
-              this.plugin.settings.backwardCompatibility = value;
-              await this.plugin.saveData(this.plugin.settings);
-            }),
-        );
-    } else {
-      const notice = advancedContainer.createDiv({
-        cls: "timelgr-settings-help",
-      });
-      notice.setText(
-        "Enable Use V2 to configure its custom prefix, suffix, and backward compatibility.",
-      );
-    }
+  getSettingDefinitions() {
+    return [
+      {
+        type: "group" as const,
+        heading: "Timestamp format",
+        items: [
+          {
+            name: "Time format",
+            desc: "Format used for timestamps.",
+            control: {
+              type: "text" as const,
+              key: "timeFormat",
+              placeholder: "HH:mm",
+              validate: (value: string) =>
+                value.trim() ? undefined : "Enter a time format.",
+            },
+          },
+          {
+            name: "Include date",
+            desc: "Add a formatted date to the timestamp.",
+            control: {
+              type: "toggle" as const,
+              key: "includeDate",
+            },
+          },
+          {
+            name: "Date format",
+            desc: "Format used for dates.",
+            control: {
+              type: "text" as const,
+              key: "dateFormat",
+              placeholder: "YYYY-MM-DD",
+              validate: (value: string) =>
+                value.trim() ? undefined : "Enter a date format.",
+            },
+          },
+          {
+            name: "Custom syntax",
+            desc: "Use {TIME} and {DATE}. Example: [{DATE} {TIME}]: or [at {TIME} of Day]:.",
+            control: {
+              type: "text" as const,
+              key: "customSyntax",
+              placeholder: "[{TIME}]: ",
+              validate: (value: string) =>
+                /\{TIME\}/i.test(value)
+                  ? undefined
+                  : "Include the {TIME} placeholder.",
+            },
+          },
+        ],
+      },
+      {
+        type: "group" as const,
+        heading: "Insertion behavior",
+        items: [
+          {
+            name: "Use V2",
+            desc: "V1 uses ```timelgr code blocks. V2 does not use code blocks; it uses a configurable prefix/suffix block, defaulting to { and }.",
+            control: {
+              type: "toggle" as const,
+              key: "useV2",
+            },
+          },
+          {
+            name: "Relative line protection",
+            desc: `Check 0–${MAX_CONTEXT} physical lines before and after. Blank lines count toward distance but are never timestamped.`,
+            control: {
+              type: "slider" as const,
+              key: "contextMode",
+              min: 0,
+              max: MAX_CONTEXT,
+              step: 1,
+            },
+          },
+          {
+            name: "Trigger mode",
+            desc: "Typing reacts to editor changes; focus reacts when the active note changes or the layout changes.",
+            control: {
+              type: "dropdown" as const,
+              key: "triggerMode",
+              options: {
+                typing: "Typing",
+                paragraph: "Focus",
+                both: "Typing + focus",
+              },
+            },
+          },
+          {
+            name: "Response debounce",
+            desc: "Delay after an editor event before evaluating the current line.",
+            control: {
+              type: "slider" as const,
+              key: "debounceMs",
+              min: 100,
+              max: 1500,
+              step: 50,
+            },
+          },
+        ],
+      },
+      {
+        type: "group" as const,
+        heading: "Advanced",
+        items: [
+          {
+            name: "Advanced settings",
+            desc: "Show additional V2 block controls and backward-compatibility options.",
+            control: {
+              type: "toggle" as const,
+              key: "advancedSettings",
+            },
+          },
+          {
+            name: "Custom prefix",
+            desc: "Standalone line used to open a V2 block.",
+            visible: () =>
+              this.plugin.settings.advancedSettings && this.plugin.settings.useV2,
+            control: {
+              type: "text" as const,
+              key: "v2Prefix",
+              placeholder: "{",
+              validate: (value: string) =>
+                value.trim() ? undefined : "Enter a prefix.",
+            },
+          },
+          {
+            name: "Custom suffix",
+            desc: "Standalone line used to close a V2 block.",
+            visible: () =>
+              this.plugin.settings.advancedSettings && this.plugin.settings.useV2,
+            control: {
+              type: "text" as const,
+              key: "v2Suffix",
+              placeholder: "}",
+              validate: (value: string) =>
+                value.trim() ? undefined : "Enter a suffix.",
+            },
+          },
+          {
+            name: "Backward compatibility",
+            desc: "When enabled with V2, both V1 ```timelgr``` blocks and V2 blocks are processed.",
+            visible: () =>
+              this.plugin.settings.advancedSettings && this.plugin.settings.useV2,
+            control: {
+              type: "toggle" as const,
+              key: "backwardCompatibility",
+            },
+          },
+        ],
+      },
+    ];
   }
 }
