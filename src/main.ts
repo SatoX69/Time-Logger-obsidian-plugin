@@ -4,9 +4,9 @@ import {
   MarkdownView,
   Plugin,
   PluginSettingTab,
+  Setting,
   TFile,
   WorkspaceLeaf,
-  SettingDefinitionItem,
 } from "obsidian";
 
 interface TimeLoggerSettings {
@@ -17,6 +17,11 @@ interface TimeLoggerSettings {
   contextMode: number;
   triggerMode: "typing" | "paragraph" | "both";
   debounceMs: number;
+  useV2: boolean;
+  advancedSettings: boolean;
+  v2Prefix: string;
+  v2Suffix: string;
+  backwardCompatibility: boolean;
 }
 
 const DEFAULT_SETTINGS: TimeLoggerSettings = {
@@ -27,10 +32,16 @@ const DEFAULT_SETTINGS: TimeLoggerSettings = {
   contextMode: 1,
   triggerMode: "both",
   debounceMs: 250,
+  useV2: false,
+  advancedSettings: false,
+  v2Prefix: "{",
+  v2Suffix: "}",
+  backwardCompatibility: false,
 };
 
 const MAX_CONTEXT = 5;
 const STRICT_LANGUAGE = "timelgr";
+
 const TIMESTAMP_FALLBACK_RE = /^\s*\[[^\]\n]+\]:\s*/;
 const FENCE_RE = /^\s*```([^\s`]*)\s*$/;
 const ANY_FENCE_RE = /^\s*```/;
@@ -61,6 +72,7 @@ function pad2(value: number): string {
 function ordinal(value: number): string {
   const mod100 = value % 100;
   if (mod100 >= 11 && mod100 <= 13) return `${value}th`;
+
   switch (value % 10) {
     case 1:
       return `${value}st`;
@@ -88,6 +100,7 @@ function formatTime(date: Date, format: string): string {
     A: h24 >= 12 ? "PM" : "AM",
     a: h24 >= 12 ? "pm" : "am",
   };
+
   return format.replace(/HH|hh|mm|ss|A|a|H|h|m|s/g, (token) => tokens[token]);
 }
 
@@ -106,6 +119,7 @@ function formatDate(date: Date, format: string): string {
     ddd: date.toLocaleString(undefined, { weekday: "short" }),
     d: String(date.getDay()),
   };
+
   return format.replace(
     /YYYY|MMMM|MMM|YY|MM|Do|DD|dddd|ddd|M|D|d/g,
     (token) => tokens[token],
@@ -114,9 +128,6 @@ function formatDate(date: Date, format: string): string {
 
 function buildTimeFormatRegex(format: string): string {
   const tokenRe = /HH|hh|mm|ss|A|a|H|h|m|s/g;
-  let pattern = "";
-  let last = 0;
-  let match: RegExpExecArray | null;
   const fragments: Record<string, string> = {
     HH: "\\d{2}",
     H: "\\d{1,2}",
@@ -130,20 +141,22 @@ function buildTimeFormatRegex(format: string): string {
     a: "(?:am|pm)",
   };
 
+  let pattern = "";
+  let last = 0;
+  let match: RegExpExecArray | null;
+
   while ((match = tokenRe.exec(format)) !== null) {
     pattern += escapeRegExp(format.slice(last, match.index));
     pattern += fragments[match[0]];
     last = match.index + match[0].length;
   }
+
   pattern += escapeRegExp(format.slice(last));
   return pattern;
 }
 
 function buildDateFormatRegex(format: string): string {
   const tokenRe = /YYYY|MMMM|MMM|YY|MM|Do|DD|dddd|ddd|M|D|d/g;
-  let pattern = "";
-  let last = 0;
-  let match: RegExpExecArray | null;
   const fragments: Record<string, string> = {
     YYYY: "\\d{4}",
     YY: "\\d{2}",
@@ -159,11 +172,16 @@ function buildDateFormatRegex(format: string): string {
     d: "\\d",
   };
 
+  let pattern = "";
+  let last = 0;
+  let match: RegExpExecArray | null;
+
   while ((match = tokenRe.exec(format)) !== null) {
     pattern += escapeRegExp(format.slice(last, match.index));
     pattern += fragments[match[0]];
     last = match.index + match[0].length;
   }
+
   pattern += escapeRegExp(format.slice(last));
   return pattern;
 }
@@ -171,12 +189,14 @@ function buildDateFormatRegex(format: string): string {
 function buildTimestampRegex(settings: TimeLoggerSettings): RegExp {
   const syntax = settings.customSyntax || DEFAULT_SETTINGS.customSyntax;
   const tokenRe = /\{(TIME|DATE)\}/gi;
+
   let pattern = "^\\s*";
   let last = 0;
   let match: RegExpExecArray | null;
 
   while ((match = tokenRe.exec(syntax)) !== null) {
     pattern += escapeRegExp(syntax.slice(last, match.index));
+
     const token = match[1].toUpperCase();
     if (token === "TIME") {
       pattern += buildTimeFormatRegex(
@@ -187,6 +207,7 @@ function buildTimestampRegex(settings: TimeLoggerSettings): RegExp {
         settings.dateFormat || DEFAULT_SETTINGS.dateFormat,
       );
     }
+
     last = match.index + match[0].length;
   }
 
@@ -218,7 +239,9 @@ function findTimelgrScopes(lines: string[]): LineRange[] {
     }
 
     if (ANY_FENCE_RE.test(value)) {
-      if (start <= line - 1) scopes.push({ start, end: line - 1 });
+      if (start <= line - 1) {
+        scopes.push({ start, end: line - 1 });
+      }
       start = -1;
     }
   }
@@ -230,11 +253,103 @@ function findTimelgrScopes(lines: string[]): LineRange[] {
   return scopes;
 }
 
+/**
+ * V2 scopes are created by exact, trimmed marker lines.
+ *
+ * Example:
+ * {
+ * Paragraph
+ *
+ * Another paragraph
+ * }
+ *
+ * Markers must be standalone lines. Every matched pair is treated as an
+ * independent scope. Unmatched opening/closing markers are ignored.
+ */
+function findV2Scopes(
+  lines: string[],
+  prefix: string,
+  suffix: string,
+): LineRange[] {
+  const scopes: LineRange[] = [];
+  const normalizedPrefix = prefix.trim();
+  const normalizedSuffix = suffix.trim();
+
+  if (!normalizedPrefix || !normalizedSuffix) return scopes;
+
+  let start = -1;
+
+  for (let line = 0; line < lines.length; line++) {
+    const value = (lines[line] ?? "").trim();
+
+    if (start === -1) {
+      if (value === normalizedPrefix) start = line + 1;
+      continue;
+    }
+
+    if (value === normalizedSuffix) {
+      if (start <= line - 1) {
+        scopes.push({ start, end: line - 1 });
+      }
+      start = -1;
+    }
+  }
+
+  return scopes;
+}
+
+function getScopes(settings: TimeLoggerSettings, lines: string[]): LineRange[] {
+  const scopes: LineRange[] = [];
+
+  if (!settings.useV2 || settings.backwardCompatibility) {
+    scopes.push(...findTimelgrScopes(lines));
+  }
+
+  if (settings.useV2) {
+    scopes.push(
+      ...findV2Scopes(
+        lines,
+        settings.v2Prefix || DEFAULT_SETTINGS.v2Prefix,
+        settings.v2Suffix || DEFAULT_SETTINGS.v2Suffix,
+      ),
+    );
+  }
+
+  return mergeRanges(scopes);
+}
+
+/**
+ * Merges overlapping/adjacent scopes so compatibility mode cannot process
+ * a paragraph twice when V1 and V2 scopes overlap.
+ */
+function mergeRanges(scopes: LineRange[]): LineRange[] {
+  if (scopes.length <= 1) return scopes;
+
+  const sorted = [...scopes].sort(
+    (a, b) => a.start - b.start || a.end - b.end,
+  );
+  const merged: LineRange[] = [{ ...sorted[0] }];
+
+  for (let i = 1; i < sorted.length; i++) {
+    const current = sorted[i];
+    const previous = merged[merged.length - 1];
+
+    if (current.start <= previous.end + 1) {
+      previous.end = Math.max(previous.end, current.end);
+    } else {
+      merged.push({ ...current });
+    }
+  }
+
+  return merged;
+}
+
 function lineInScopes(line: number, scopes: LineRange[]): boolean {
   for (const scope of scopes) {
     if (line < scope.start) return false;
     if (line <= scope.end) return true;
   }
+
   return false;
 }
 
@@ -250,6 +365,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function validNonEmptyString(
+  value: unknown,
+  fallback: string,
+): string {
+  return typeof value === "string" && value.length > 0 ? value : fallback;
+}
+
+function normalizeMarker(value: unknown, fallback: string): string {
+  const candidate = typeof value === "string" ? value.trim() : "";
+  return candidate.length > 0 ? candidate : fallback;
+}
+
 export default class TimeLoggerPlugin extends Plugin {
   settings: TimeLoggerSettings = { ...DEFAULT_SETTINGS };
 
@@ -259,6 +386,7 @@ export default class TimeLoggerPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
     this.addSettingTab(new TimeLoggerSettingTab(this.app, this));
+
     this.registerMarkdownPostProcessor((element) =>
       this.styleRenderedTimestamps(element),
     );
@@ -268,15 +396,18 @@ export default class TimeLoggerPlugin extends Plugin {
         if (leaf) this.scheduleLeaf(leaf, "focus");
       }),
     );
+
     this.registerEvent(
       this.app.workspace.on("editor-change", (editor, info) => {
         this.scheduleEditor(editor, info.file, "change");
       }),
     );
+
     this.registerEvent(
       this.app.workspace.on("layout-change", () => {
         const view =
           this.app.workspace.getActiveViewOfType<MarkdownView>(MarkdownView);
+
         if (view) this.scheduleEditor(view.editor, view.file, "layout");
       }),
     );
@@ -292,6 +423,7 @@ export default class TimeLoggerPlugin extends Plugin {
           true,
         ),
     });
+
     this.addCommand({
       id: "rescan-current-note",
       name: "Rescan current note",
@@ -306,11 +438,15 @@ export default class TimeLoggerPlugin extends Plugin {
 
     const view =
       this.app.workspace.getActiveViewOfType<MarkdownView>(MarkdownView);
+
     if (view) this.scheduleEditor(view.editor, view.file, "startup");
   }
 
   onunload(): void {
-    for (const timer of this.timers.values()) window.clearTimeout(timer);
+    for (const timer of this.timers.values()) {
+      window.clearTimeout(timer);
+    }
+
     this.timers.clear();
   }
 
@@ -319,22 +455,22 @@ export default class TimeLoggerPlugin extends Plugin {
     const data = isRecord(stored) ? stored : {};
 
     this.settings = {
-      timeFormat:
-        typeof data.timeFormat === "string" && data.timeFormat.length > 0
-          ? data.timeFormat
-          : DEFAULT_SETTINGS.timeFormat,
+      timeFormat: validNonEmptyString(
+        data.timeFormat,
+        DEFAULT_SETTINGS.timeFormat,
+      ),
       includeDate:
         typeof data.includeDate === "boolean"
           ? data.includeDate
           : DEFAULT_SETTINGS.includeDate,
-      dateFormat:
-        typeof data.dateFormat === "string" && data.dateFormat.length > 0
-          ? data.dateFormat
-          : DEFAULT_SETTINGS.dateFormat,
-      customSyntax:
-        typeof data.customSyntax === "string" && data.customSyntax.length > 0
-          ? data.customSyntax
-          : DEFAULT_SETTINGS.customSyntax,
+      dateFormat: validNonEmptyString(
+        data.dateFormat,
+        DEFAULT_SETTINGS.dateFormat,
+      ),
+      customSyntax: validNonEmptyString(
+        data.customSyntax,
+        DEFAULT_SETTINGS.customSyntax,
+      ),
       contextMode: clampContext(data.contextMode),
       triggerMode:
         data.triggerMode === "typing" ||
@@ -346,9 +482,31 @@ export default class TimeLoggerPlugin extends Plugin {
         100,
         Math.min(
           1500,
-          Math.round(Number(data.debounceMs) || DEFAULT_SETTINGS.debounceMs),
+          Math.round(
+            Number(data.debounceMs) || DEFAULT_SETTINGS.debounceMs,
+          ),
         ),
       ),
+      useV2:
+        typeof data.useV2 === "boolean"
+          ? data.useV2
+          : DEFAULT_SETTINGS.useV2,
+      advancedSettings:
+        typeof data.advancedSettings === "boolean"
+          ? data.advancedSettings
+          : DEFAULT_SETTINGS.advancedSettings,
+      v2Prefix: normalizeMarker(
+        data.v2Prefix,
+        DEFAULT_SETTINGS.v2Prefix,
+      ),
+      v2Suffix: normalizeMarker(
+        data.v2Suffix,
+        DEFAULT_SETTINGS.v2Suffix,
+      ),
+      backwardCompatibility:
+        typeof data.backwardCompatibility === "boolean"
+          ? data.backwardCompatibility
+          : DEFAULT_SETTINGS.backwardCompatibility,
     };
 
     await this.saveData(this.settings);
@@ -360,18 +518,27 @@ export default class TimeLoggerPlugin extends Plugin {
 
     element.querySelectorAll<HTMLElement>(selector).forEach((node) => {
       const first = node.firstChild;
-      if (!first || first.nodeType !== Node.TEXT_NODE || !first.textContent)
+
+      if (
+        !first ||
+        first.nodeType !== Node.TEXT_NODE ||
+        !first.textContent
+      ) {
         return;
+      }
 
       const value = first.textContent;
       const match = value.match(timestampRegex);
+
       if (!match || match[0].length === 0) return;
 
       const span = node.createSpan({
         cls: "timelgr-preview-timestamp",
         text: match[0],
       });
+
       first.replaceWith(span);
+
       if (value.length > match[0].length) {
         span.insertAdjacentText("afterend", value.slice(match[0].length));
       }
@@ -392,8 +559,10 @@ export default class TimeLoggerPlugin extends Plugin {
       !file ||
       this.updatingEditors.has(editor) ||
       !this.shouldHandleReason(reason)
-    )
+    ) {
       return;
+    }
+
     if (!this.isActiveEditor(editor, file)) return;
 
     const existing = this.timers.get(file.path);
@@ -413,7 +582,9 @@ export default class TimeLoggerPlugin extends Plugin {
         return reason === "change" || reason === "startup";
       case "paragraph":
         return (
-          reason === "focus" || reason === "layout" || reason === "startup"
+          reason === "focus" ||
+          reason === "layout" ||
+          reason === "startup"
         );
       default:
         return true;
@@ -423,14 +594,18 @@ export default class TimeLoggerPlugin extends Plugin {
   private isActiveEditor(editor: Editor, file: TFile): boolean {
     const view =
       this.app.workspace.getActiveViewOfType<MarkdownView>(MarkdownView);
+
     return Boolean(
-      view && view.editor === editor && view.file?.path === file.path,
+      view &&
+        view.editor === editor &&
+        view.file?.path === file.path,
     );
   }
 
   /**
    * Automatic processing works on the cursor's logical paragraph only.
-   * Explicit rescan processes every paragraph in every timelgr scope.
+   * Explicit rescan processes every eligible paragraph in every configured
+   * scope. The relative context rule is identical for V1 and V2.
    */
   private processEditor(
     editor: Editor,
@@ -442,28 +617,34 @@ export default class TimeLoggerPlugin extends Plugin {
       !file ||
       this.updatingEditors.has(editor) ||
       !this.isActiveEditor(editor, file)
-    )
+    ) {
       return;
+    }
 
     const source = editor.getValue();
     const lines = source.split("\n");
-    const scopes = findTimelgrScopes(lines);
+    const scopes = getScopes(this.settings, lines);
+
     if (scopes.length === 0) return;
 
     const paragraphs = this.getParagraphs(lines, scopes);
     const cursor = editor.getCursor();
+
     const candidates = cursorOnly
       ? this.getCursorParagraph(paragraphs, cursor.line)
       : paragraphs;
 
     if (candidates.length === 0) return;
 
-    // This set is updated as a rescan plans insertions. Therefore the relative
-    // rule remains true even between newly planned timestamps.
+    // Updated during planning so the relative rule remains deterministic
+    // even when multiple insertions are created during one rescan.
     const timestampLines = new Set<number>();
+
     for (const paragraph of paragraphs) {
       for (let line = paragraph.start; line <= paragraph.end; line++) {
-        if (this.isTimestampedLine(lines[line] ?? "")) timestampLines.add(line);
+        if (this.isTimestampedLine(lines[line] ?? "")) {
+          timestampLines.add(line);
+        }
       }
     }
 
@@ -472,8 +653,10 @@ export default class TimeLoggerPlugin extends Plugin {
 
     for (const paragraph of candidates) {
       const target = paragraph.start;
+
       if (!meaningful(lines[target] ?? "")) continue;
       if (this.paragraphHasTimestamp(paragraph, timestampLines)) continue;
+
       if (
         context > 0 &&
         this.hasNearbyTimestamp(
@@ -483,10 +666,15 @@ export default class TimeLoggerPlugin extends Plugin {
           lines.length,
           scopes,
         )
-      )
+      ) {
         continue;
+      }
 
-      planned.push({ line: target, text: this.makeTimestamp(new Date()) });
+      planned.push({
+        line: target,
+        text: this.makeTimestamp(new Date()),
+      });
+
       timestampLines.add(target);
 
       if (cursorOnly && force) break;
@@ -497,11 +685,15 @@ export default class TimeLoggerPlugin extends Plugin {
   }
 
   /** Groups consecutive non-empty lines; blank lines separate paragraphs. */
-  private getParagraphs(lines: string[], scopes: LineRange[]): LineRange[] {
+  private getParagraphs(
+    lines: string[],
+    scopes: LineRange[],
+  ): LineRange[] {
     const result: LineRange[] = [];
 
     for (const scope of scopes) {
       let start = -1;
+
       for (let line = scope.start; line <= scope.end; line++) {
         if (meaningful(lines[line] ?? "")) {
           if (start === -1) start = line;
@@ -510,7 +702,10 @@ export default class TimeLoggerPlugin extends Plugin {
           start = -1;
         }
       }
-      if (start !== -1) result.push({ start, end: scope.end });
+
+      if (start !== -1) {
+        result.push({ start, end: scope.end });
+      }
     }
 
     return result;
@@ -521,9 +716,11 @@ export default class TimeLoggerPlugin extends Plugin {
     cursorLine: number,
   ): LineRange[] {
     for (const paragraph of paragraphs) {
-      if (cursorLine >= paragraph.start && cursorLine <= paragraph.end)
+      if (cursorLine >= paragraph.start && cursorLine <= paragraph.end) {
         return [paragraph];
+      }
     }
+
     return [];
   }
 
@@ -534,12 +731,13 @@ export default class TimeLoggerPlugin extends Plugin {
     for (let line = paragraph.start; line <= paragraph.end; line++) {
       if (timestampLines.has(line)) return true;
     }
+
     return false;
   }
 
   /**
-   * Physical-line context: blank lines count toward the distance but do not
-   * themselves block insertion because they are not timestamped.
+   * Physical-line context preserved from V1.
+   * Blank lines count toward distance but are never timestamped.
    */
   private hasNearbyTimestamp(
     timestampLines: Set<number>,
@@ -551,19 +749,24 @@ export default class TimeLoggerPlugin extends Plugin {
     for (let offset = 1; offset <= distance; offset++) {
       const before = targetLine - offset;
       const after = targetLine + offset;
+
       if (
         before >= 0 &&
         lineInScopes(before, scopes) &&
         timestampLines.has(before)
-      )
+      ) {
         return true;
+      }
+
       if (
         after < lineCount &&
         lineInScopes(after, scopes) &&
         timestampLines.has(after)
-      )
+      ) {
         return true;
+      }
     }
+
     return false;
   }
 
@@ -580,6 +783,7 @@ export default class TimeLoggerPlugin extends Plugin {
     insertions.sort((a, b) => b.line - a.line);
 
     this.updatingEditors.add(editor);
+
     try {
       for (const item of insertions) {
         editor.replaceRange(
@@ -593,7 +797,10 @@ export default class TimeLoggerPlugin extends Plugin {
         .filter((item) => item.line === cursor.line)
         .reduce((total, item) => total + item.text.length, 0);
 
-      editor.setCursor({ line: cursor.line, ch: cursor.ch + cursorShift });
+      editor.setCursor({
+        line: cursor.line,
+        ch: cursor.ch + cursorShift,
+      });
     } finally {
       this.updatingEditors.delete(editor);
     }
@@ -604,6 +811,7 @@ export default class TimeLoggerPlugin extends Plugin {
       date,
       this.settings.timeFormat || DEFAULT_SETTINGS.timeFormat,
     );
+
     const dateText = this.settings.includeDate
       ? formatDate(
           date,
@@ -625,110 +833,217 @@ class TimeLoggerSettingTab extends PluginSettingTab {
     super(app, plugin);
   }
 
-  getSettingDefinitions(): SettingDefinitionItem[] {
-    return [
-      {
-  type: "group",
-  heading: "Timestamp format",
-  items: [
-    {
-      name: "Time format",
-      desc: "Format used for timestamps.",
-      control: {
-        type: "text",
-        key: "timeFormat",
-        placeholder: "HH:mm",
-        validate: (value: string) =>
-          value.trim().length > 0
-            ? undefined
-            : "Time format cannot be empty.",
-      },
-    },
+  display(): void {
+    const { containerEl } = this;
+    containerEl.empty();
 
-    {
-      name: "Include date",
-      desc: "Add a formatted date to the timestamp.",
-      control: {
-        type: "toggle",
-        key: "includeDate",
-      },
-    },
+    new Setting(containerEl).setName("Timestamp format").setHeading();
 
-    {
-      name: "Date format",
-      desc: "Format used for dates.",
-      control: {
-        type: "text",
-        key: "dateFormat",
-        placeholder: "YYYY-MM-DD",
-        validate: (value: string) =>
-          value.trim().length > 0
-            ? undefined
-            : "Date format cannot be empty.",
-      },
-    },
-  ],
-},
+    new Setting(containerEl)
+      .setName("Time format")
+      .setDesc("Format used for timestamps.")
+      .addText((text) =>
+        text
+          .setValue(this.plugin.settings.timeFormat)
+          .setPlaceholder("HH:mm")
+          .onChange(async (value) => {
+            const next = value.trim();
+            if (!next) return;
+            this.plugin.settings.timeFormat = next;
+            await this.plugin.saveData(this.plugin.settings);
+          }),
+      );
 
-          {
-            name: "Custom syntax",
-            desc: "Use {TIME} and {DATE}. Example: [{DATE} {TIME}]: or [at {TIME} of Day]:.",
-            control: {
-              type: "text",
-              key: "customSyntax",
-              placeholder: "[{TIME}]: ",
-              validate: (value: string) => /\{TIME\}/i.test(value) ? undefined : "Custom syntax must contain {TIME}.",
-            },
-          },
-      {
-        type: "group",
-        heading: "Insertion behavior",
-        items: [
-          {
-            name: "Relative line protection",
-            desc: `Check 0–${MAX_CONTEXT} physical lines before and after. Blank lines count toward distance but are never timestamped.`,
+    new Setting(containerEl)
+      .setName("Include date")
+      .setDesc("Add a formatted date to the timestamp.")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.includeDate)
+          .onChange(async (value) => {
+            this.plugin.settings.includeDate = value;
+            await this.plugin.saveData(this.plugin.settings);
+          }),
+      );
 
-            control: {
-              type: "slider",
-              key: "contextMode",
-              min: 0,
-              max: MAX_CONTEXT,
-              step: 1,
-              defaultValue: DEFAULT_SETTINGS.contextMode,
-            },
-          },
+    new Setting(containerEl)
+      .setName("Date format")
+      .setDesc("Format used for dates.")
+      .addText((text) =>
+        text
+          .setValue(this.plugin.settings.dateFormat)
+          .setPlaceholder("YYYY-MM-DD")
+          .onChange(async (value) => {
+            const next = value.trim();
+            if (!next) return;
+            this.plugin.settings.dateFormat = next;
+            await this.plugin.saveData(this.plugin.settings);
+          }),
+      );
 
-          {
-            name: "Trigger mode",
-            desc: "Typing reacts to editor changes; focus reacts when the active note changes or the layout changes.",
+    new Setting(containerEl)
+      .setName("Custom syntax")
+      .setDesc(
+        "Use {TIME} and {DATE}. Example: [{DATE} {TIME}]: or [at {TIME} of Day]:.",
+      )
+      .addText((text) =>
+        text
+          .setValue(this.plugin.settings.customSyntax)
+          .setPlaceholder("[{TIME}]: ")
+          .onChange(async (value) => {
+            if (!/\{TIME\}/i.test(value)) return;
+            this.plugin.settings.customSyntax = value;
+            await this.plugin.saveData(this.plugin.settings);
+          }),
+      );
 
-            control: {
-              type: "dropdown",
-              key: "triggerMode",
-              defaultValue: DEFAULT_SETTINGS.triggerMode,
-              options: {
-                typing: "Typing",
-                paragraph: "Focus",
-                both: "Typing + focus",
-              },
-            },
-          },
+    new Setting(containerEl).setName("Insertion behavior").setHeading();
 
-          {
-            name: "Response debounce",
-            desc: "Delay after an editor event before evaluating the current line.",
+    new Setting(containerEl)
+      .setName("Use V2")
+      .setDesc(
+        'V1 uses ```timelgr code blocks. V2 does not use code blocks; it uses a configurable prefix/suffix block, defaulting to { and }.',
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.useV2)
+          .onChange(async (value) => {
+            this.plugin.settings.useV2 = value;
+            await this.plugin.saveData(this.plugin.settings);
+          }),
+      );
 
-            control: {
-              type: "slider",
-              key: "debounceMs",
-              min: 100,
-              max: 1500,
-              step: 50,
-              defaultValue: DEFAULT_SETTINGS.debounceMs,
-            },
-          },
-        ],
-      },
-    ] satisfies SettingDefinitionItem[];
+    new Setting(containerEl)
+      .setName("Relative line protection")
+      .setDesc(
+        `Check 0–${MAX_CONTEXT} physical lines before and after. Blank lines count toward distance but are never timestamped.`,
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(0, MAX_CONTEXT, 1)
+          .setValue(this.plugin.settings.contextMode)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.contextMode = value;
+            await this.plugin.saveData(this.plugin.settings);
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Trigger mode")
+      .setDesc(
+        "Typing reacts to editor changes; focus reacts when the active note changes or the layout changes.",
+      )
+      .addDropdown((dropdown) =>
+        dropdown
+          .addOption("typing", "Typing")
+          .addOption("paragraph", "Focus")
+          .addOption("both", "Typing + focus")
+          .setValue(this.plugin.settings.triggerMode)
+          .onChange(async (value) => {
+            if (
+              value !== "typing" &&
+              value !== "paragraph" &&
+              value !== "both"
+            ) {
+              return;
+            }
+
+            this.plugin.settings.triggerMode = value;
+            await this.plugin.saveData(this.plugin.settings);
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Response debounce")
+      .setDesc(
+        "Delay after an editor event before evaluating the current line.",
+      )
+      .addSlider((slider) =>
+        slider
+          .setLimits(100, 1500, 50)
+          .setValue(this.plugin.settings.debounceMs)
+          .setDynamicTooltip()
+          .onChange(async (value) => {
+            this.plugin.settings.debounceMs = value;
+            await this.plugin.saveData(this.plugin.settings);
+          }),
+      );
+
+    new Setting(containerEl).setName("Advanced settings").setHeading();
+
+    new Setting(containerEl)
+      .setName("Advanced settings")
+      .setDesc(
+        "Show additional V2 block controls and backward-compatibility options.",
+      )
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.advancedSettings)
+          .onChange(async (value) => {
+            this.plugin.settings.advancedSettings = value;
+            await this.plugin.saveData(this.plugin.settings);
+            this.display();
+          }),
+      );
+
+    if (!this.plugin.settings.advancedSettings) return;
+
+    const advancedContainer = containerEl.createDiv({
+      cls: "timelgr-settings-advanced",
+    });
+
+    if (this.plugin.settings.useV2) {
+      new Setting(advancedContainer)
+        .setName("Custom prefix")
+        .setDesc("Standalone line used to open a V2 block.")
+        .addText((text) =>
+          text
+            .setValue(this.plugin.settings.v2Prefix)
+            .setPlaceholder("{")
+            .onChange(async (value) => {
+              const next = value.trim();
+              if (!next) return;
+              this.plugin.settings.v2Prefix = next;
+              await this.plugin.saveData(this.plugin.settings);
+            }),
+        );
+
+      new Setting(advancedContainer)
+        .setName("Custom suffix")
+        .setDesc("Standalone line used to close a V2 block.")
+        .addText((text) =>
+          text
+            .setValue(this.plugin.settings.v2Suffix)
+            .setPlaceholder("}")
+            .onChange(async (value) => {
+              const next = value.trim();
+              if (!next) return;
+              this.plugin.settings.v2Suffix = next;
+              await this.plugin.saveData(this.plugin.settings);
+            }),
+        );
+
+      new Setting(advancedContainer)
+        .setName("Backward compatibility")
+        .setDesc(
+          "When enabled with V2, both V1 ```timelgr``` blocks and V2 blocks are processed.",
+        )
+        .addToggle((toggle) =>
+          toggle
+            .setValue(this.plugin.settings.backwardCompatibility)
+            .onChange(async (value) => {
+              this.plugin.settings.backwardCompatibility = value;
+              await this.plugin.saveData(this.plugin.settings);
+            }),
+        );
+    } else {
+      const notice = advancedContainer.createDiv({
+        cls: "timelgr-settings-help",
+      });
+      notice.setText(
+        "Enable Use V2 to configure its custom prefix, suffix, and backward compatibility.",
+      );
+    }
   }
 }

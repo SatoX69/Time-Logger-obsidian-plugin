@@ -1,14 +1,14 @@
-# Time Logger 1.3.0
+# Time Logger 1.4.0
 
-Time Logger automatically adds time/date prefixes to journal paragraphs inside `timelgr` fenced blocks.
+Time Logger automatically adds time/date prefixes to journal paragraphs inside configured Time Logger blocks.
 
-## Scope
+## V1 and V2
 
-Strict mode is permanently enabled in this release. There is no non-strict toggle or command.
+Version 1.4.0 keeps the existing V1 implementation unchanged as the default.
 
-Only content between `timelgr` fences is processed:
+### V1 — `timelgr` fenced blocks
 
-![Time Logger](/images/time-logger.jpeg)
+V1 uses strict `timelgr` fenced blocks:
 
 ```text
 ```timelgr
@@ -18,41 +18,79 @@ next paragraph.....
 ```
 ```
 
-Everything outside a `timelgr` block is untouched.
+With **Use V2** disabled, only `timelgr` blocks are processed.
+
+### V2 — prefix/suffix blocks
+
+V2 does not use Markdown code fences. Instead, a block is delimited by standalone prefix and suffix lines.
+
+The defaults are:
+
+```text
+{
+user text.....
+
+next paragraph.....
+}
+```
+
+Any eligible paragraph inside a matched V2 block can receive a timestamp.
+
+Multiple V2 blocks in the same note are supported and are evaluated independently.
+
+The default prefix and suffix can be changed from **Advanced settings**. Custom markers are matched as standalone, trimmed lines; this prevents ordinary uses of `{` or `}` inside prose from becoming blocks.
+
+Unmatched V2 markers are ignored.
+
+## Use V2
+
+The **Use V2** toggle selects the block implementation:
+
+- **Off:** V1 only (` ```timelgr `).
+- **On:** V2 only by default.
+- **On + Backward compatibility:** V1 and V2 are both processed.
+
+V1 remains the default so upgrading from 1.3.7 does not change existing note behavior.
+
+## Advanced settings
+
+Enable **Advanced settings** to reveal the V2 controls.
+
+**Custom prefix** and **Custom suffix** replace the default `{` and `}` markers.
+
+**Backward compatibility** is available when V2 is enabled. When enabled, V1 ` ```timelgr ` blocks and V2 blocks are both recognized.
 
 ## Automatic behaviour
 
-Processing is event-driven and debounced. There is no fixed polling interval.
+Processing remains event-driven and debounced. There is no polling interval.
 
-Normal automatic processing evaluates the paragraph containing the cursor. The timestamp is inserted at that paragraph's first non-empty line, so reopening a journal does not unexpectedly rewrite its entire history.
+Normal automatic processing evaluates the paragraph containing the cursor. The timestamp is inserted at that paragraph's first non-empty line.
 
-Use **Rescan current note** when you intentionally want every eligible paragraph in every `timelgr` scope evaluated.
+Use **Rescan current note** when you intentionally want every eligible paragraph in every configured V1/V2 scope evaluated.
+
+The existing debounce behavior is preserved, with the default response debounce remaining 250 ms.
 
 ## Relative line protection
 
+The existing relative protection behavior is preserved for both V1 and V2.
+
 The setting supports `Off` through `5 lines`.
 
-With `1`, the immediate physical line above and the immediate physical line below are checked. Blank lines count as physical lines when measuring that distance, but blank lines are never timestamp insertion targets.
+With `1`, the immediate physical line above and the immediate physical line below are checked. Blank lines count as physical lines when measuring that distance, but blank lines are never timestamp targets.
 
-For example, with `1`:
-
-```text
-[04:45]: previous entry
-
-new entry
-```
-
-`new entry` is two physical lines after the timestamp, so the blank line does not cause it to be skipped.
-
-During a rescan, timestamps planned earlier in the same pass also become part of the protection set. This makes the rule deterministic instead of depending on which editor change happened first.
+During a rescan, timestamps planned earlier in the same pass also become part of the protection set. This keeps the result deterministic.
 
 ## Formatting
 
-Time tokens: `HH`, `H`, `hh`, `h`, `mm`, `m`, `ss`, `s`, `A`, `a`.
+Time tokens:
 
-Date tokens: `YYYY`, `YY`, `MMMM`, `MMM`, `MM`, `M`, `Do`, `DD`, `D`, `dddd`, `ddd`, `d`.
+`HH`, `H`, `hh`, `h`, `mm`, `m`, `ss`, `s`, `A`, `a`.
 
-Custom syntax supports `{TIME}` and `{DATE}`. Surrounding text is preserved.
+Date tokens:
+
+`YYYY`, `YY`, `MMMM`, `MMM`, `MM`, `M`, `Do`, `DD`, `D`, `dddd`, `ddd`, `d`.
+
+Custom timestamp syntax supports `{TIME}` and `{DATE}`.
 
 Example:
 
@@ -62,7 +100,16 @@ Example:
 
 ## Commands
 
-- **Insert timestamp at current line** — explicitly timestamp the current paragraph when it is inside a `timelgr` block.
-- **Rescan current note** — evaluate every non-empty paragraph inside `timelgr` blocks.
+- **Insert timestamp at current line** — explicitly timestamp the current paragraph when it is inside an enabled Time Logger scope.
+- **Rescan current note** — evaluate every eligible paragraph in every enabled scope.
 
-###### Generated with AI, debugged and stabilized by me
+## Upgrade notes
+
+Upgrading from 1.3.7 is non-destructive:
+
+- V2 is disabled by default.
+- Existing V1 settings are retained.
+- Existing `timelgr` blocks continue to work exactly as before when V2 is disabled.
+- V2-specific settings are added with safe defaults.
+
+###### Works really well for journaling. -- my testimony
